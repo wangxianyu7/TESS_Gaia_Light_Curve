@@ -1,4 +1,5 @@
 import numpy as np
+from numba import njit
 from wotan import flatten
 import tglc
 
@@ -109,6 +110,69 @@ def get_psf(source, factor=2, psf_size=11, edge_compression=1e-4, c=np.array([0,
     A_mod = np.concatenate((A_mod, (np.zeros((over_size ** 2, bg_dof)))), axis=-1)
     A = np.append(A, A_mod, axis=0)
     return A, star_info, over_size, x_round, y_round
+
+
+
+@njit
+def fit_psf_core(A, flux_flat, mask_flat, over_size, median_flux, power=0.8):
+    n_pix = flux_flat.shape[0]
+
+    # Apply mask for low flux
+    for i in range(n_pix):
+        if flux_flat[i] < 0.8 * median_flux:
+            mask_flat[i] = True
+
+    n_valid = 0
+    for i in range(n_pix):
+        if not mask_flat[i]:
+            n_valid += 1
+
+    total_rows = n_valid + over_size ** 2
+    n_params = A.shape[1]
+
+    # Prepare b and scaler
+    b = np.empty(total_rows)
+    scaler = np.empty(total_rows)
+    a = np.zeros((total_rows, n_params))
+
+    j = 0
+    for i in range(n_pix):
+        if not mask_flat[i]:
+            val = flux_flat[i]
+            b[j] = val
+            scaler[j] = np.abs(val) ** power
+            for k in range(n_params):
+                a[j, k] = A[i, k]
+            j += 1
+
+    for i in range(over_size ** 2):
+        b[n_valid + i] = 0.0
+        scaler[n_valid + i] = 1.0
+        # a[n_valid + i, :] is already 0
+
+    # Normalize a and b
+    for i in range(total_rows):
+        for k in range(n_params):
+            a[i, k] /= scaler[i]
+        b[i] /= scaler[i]
+
+    # Solve system
+    try:
+        alpha = np.dot(a.T, a)
+        beta = np.dot(a.T, b)
+        fit = np.linalg.solve(alpha, beta)
+    except Exception:
+        fit = np.full(n_params, np.nan)
+
+    return fit
+
+
+def fit_psf_numba(A, source, over_size, power=0.8, time=0):
+    flux = np.ravel(source.flux[time]).astype(np.float64)
+    mask = np.ravel(source.mask.mask).copy()
+    A = A.astype(np.float64)
+    median_flux = np.nanmedian(flux)
+    return fit_psf_core(A, flux, mask, over_size, median_flux, power)
 
 
 def fit_psf(A, source, over_size, power=0.8, time=0):

@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from tqdm import trange
 from os.path import exists
-from tglc.effective_psf import get_psf, fit_psf, fit_lc, fit_lc_float_field, bg_mod
+from tglc.effective_psf import get_psf, fit_psf, fit_lc, fit_lc_float_field, bg_mod, fit_psf_numba
 from tglc.ffi import Source
 from tglc.ffi_cut import Source_cut
 
@@ -252,7 +252,8 @@ def epsf(source, psf_size=11, factor=2, local_directory='', target=None, cut_x=0
     else:
         e_psf = np.zeros((len(source.time), over_size ** 2 + bg_dof))
         for i in trange(len(source.time), desc='Fitting ePSF', disable=no_progress_bar):
-            e_psf[i] = fit_psf(A, source, over_size, power=power, time=i)
+            # e_psf[i] = fit_psf(A, source, over_size, power=power, time=i)
+            e_psf[i] = fit_psf_numba(A, source, over_size, power=power, time=i)
         if np.isnan(e_psf).any():
             warnings.warn(
                 f"TESS FFI cut includes Nan values. Please shift the center of the cutout to remove Nan near edge. Target: {target}")
